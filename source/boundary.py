@@ -1,24 +1,22 @@
 #-------------------------------------------------------------------------------
 # This file contains functions that:
-# (1) define the boundaries of the mesh (ice-air,ice-water,inflow/outflow)
-# (2) mark the boundaries of the mesh, AND ...
-# (3) possibly create Dirichlet boundary conditions on one or both side walls of the domain.
+# (1) define the boundaries of the mesh 
+# (2) mark the boundaries of the mesh
 #-------------------------------------------------------------------------------
 import numpy as np
 from dolfinx.mesh import locate_entities, meshtags
-from params import L, z_max
+from params import L
 
 #-------------------------------------------------------------------------------
-# Define SubDomains for ice-water boundary, ice-bed boundary, inflow (x=0) and
-# outflow (x=Length of domain). 
+# Define boundaries of the mesh
 
-def WaterBoundary(x):
+def LowerBoundary(x):
 # Ice-water boundary    
-    return np.less(x[1],z_max)
+    return np.isclose(x[1],-H/2.0)
 
 def TopBoundary(x):
 # Ice-air boundary    
-    return np.greater(x[1],z_max)
+    return np.isclose(x[1],H/2.0)
 
 def LeftBoundary(x):
     # Left boundary (inflow/outflow)
@@ -31,15 +29,14 @@ def RightBoundary(x):
 #-------------------------------------------------------------------------------
 
 def mark_boundary(domain):
-    # Assign markers to each boundary segment (except the upper surface).
-    # This is used at each time step to update the markers.
-    #
+    # Assign markers to each boundary segment.
     # Boundary marker numbering convention:
     # 1 - Left boundary
     # 2 - Right boundary
-    # 3 - Ice-water boundary
+    # 3 - Lower boundary
+    # 4 - Top boundary
 
-    boundaries = [(3, WaterBoundary),(4,TopBoundary),(1, LeftBoundary),(2, RightBoundary)]
+    boundaries = [(3, LowerBoundary),(4,TopBoundary),(1, LeftBoundary),(2, RightBoundary)]
     facet_indices, facet_markers = [], []
     fdim = domain.topology.dim - 1
     for (marker, locator) in boundaries:
