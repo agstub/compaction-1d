@@ -27,14 +27,14 @@ def solve(domain,m,initial):
 
     # # Begin time stepping
     t=0
-    for i in range(nt):
+    for i in range(1):
 
         sol_n = initial
 
         print('Iteration '+str(i+1)+' out of '+str(nt)+' \r',end='')
 
         # Solve the Darcy-Stokes problem for sol = (phi_i,phi_w,u,p_w,p_e)
-        sol = stokes_solve(domain,m,sol_n)
+        sol = stokes_solve(domain,m,sol_n,t)
      
   
         # # save the stokes solution 

@@ -5,7 +5,7 @@
 #-------------------------------------------------------------------------------
 import numpy as np
 from dolfinx.mesh import locate_entities, meshtags
-from params import L
+from params import L, H
 
 #-------------------------------------------------------------------------------
 # Define boundaries of the mesh
@@ -36,7 +36,7 @@ def mark_boundary(domain):
     # 3 - Lower boundary
     # 4 - Top boundary
 
-    boundaries = [(3, LowerBoundary),(4,TopBoundary),(1, LeftBoundary),(2, RightBoundary)]
+    boundaries = [(1, LeftBoundary),(2, RightBoundary),(3, LowerBoundary),(4,TopBoundary)]
     facet_indices, facet_markers = [], []
     fdim = domain.topology.dim - 1
     for (marker, locator) in boundaries:
