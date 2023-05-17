@@ -1,2 +1,2 @@
-# ice-bed
-finite element codes for investigating ice-sediment interaction
+# compaction-1d
+finite element code for a one-dimensional compaction model
