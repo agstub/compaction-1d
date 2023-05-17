@@ -5,19 +5,12 @@ from dolfinx.fem import (Function, FunctionSpace, dirichletbc,
 from dolfinx.fem.petsc import NonlinearProblem
 from dolfinx.mesh import locate_entities_boundary
 from dolfinx.nls.petsc import NewtonSolver
-from misc import interp, move_mesh
+from misc import C, K, get_stress, interp, max, move_mesh
 from mpi4py import MPI
-from params import a, alpha, b, dt, eps, nt, nz, phi_min, theta
+from params import alpha, dt, eps, nt, nz, phi0, phi_min, theta
 from petsc4py import PETSc
-from ufl import Dx, FiniteElement, TestFunctions, ds, dx, split
+from ufl import Dx, FiniteElement, TestFunction, TestFunctions, ds, dx, split
 
-
-def K(phi):
-      # 1/permeability 
-      return (phi**a)/((1-phi)**b)
-
-def max(f1,f2):
-     return 0.5*(f1+f2 + ((f1-f2)**2)**0.5)
 
 def weak_form(w,w_t,w_n,phi,phi_t,phi_n,bc_top):
     # Weak form of the residual for the Darcy-Stokes problem
@@ -25,7 +18,7 @@ def weak_form(w,w_t,w_n,phi,phi_t,phi_n,bc_top):
     phi_theta = theta*phi + (1-theta)*phi_n
 
     # weak form of momentum balance:
-    F_w =  (eps**2 / K(phi))*w*w_t*dx + (1-phi)*Dx(w,0)*Dx(w_t,0)*dx  + (1-phi)*alpha*w_t*dx
+    F_w =  (eps**2 / K(phi))*w*w_t*dx + (1-phi)*C(phi,phi0)*Dx(w,0)*Dx(w_t,0)*dx  + (1-phi)*alpha*w_t*dx
 
     # add stress BC if w is not prescribed at top boundary:
     if bc_top['type'] == 'stress':
@@ -37,6 +30,16 @@ def weak_form(w,w_t,w_n,phi,phi_t,phi_n,bc_top):
     # add constraint phi>phi_min:
     F_phi += (phi-max(phi_min,phi))*phi_t*dx
     return F_w + F_phi
+
+def weak_form_vel(w,w_t,phi,bc_top):
+    # Weak form of the residual 
+    # Non-coupled problem - solve momentum balance for a fixed porosity 
+    F_w =  (eps**2 / K(phi))*w*w_t*dx + (1-phi)*C(phi,phi0)*Dx(w,0)*Dx(w_t,0)*dx  + (1-phi)*alpha*w_t*dx
+    # add stress BC if w is not prescribed at top boundary:
+    if bc_top['type'] == 'stress':
+        F_w += bc_top['value']*w_t*ds 
+
+    return F_w 
 
 
 def solve_pde(domain,sol_n,bc_top):
@@ -92,10 +95,7 @@ def solve_pde(domain,sol_n,bc_top):
       
         return sol
 
-
-
-
-def solve(domain,initial,bc_top):
+def full_solve(domain,initial,bc_top):
     # solve the mixture model given:
     # domain: the computational domain
     # m: melting/freezing rate field 
@@ -106,9 +106,10 @@ def solve(domain,initial,bc_top):
     # w: vertical velocity 
     # phi: porosity
 
-    w_arr = np.zeros((nt,nz))
-    phi_arr = np.zeros((nt,nz))
-    z_arr = np.zeros((nt,nz))
+    w_arr = np.zeros((nt,nz+1))
+    phi_arr = np.zeros((nt,nz+1))
+    z_arr = np.zeros((nt,nz+1))
+    sigma_arr = np.zeros((nt,nz+1))
 
     sol_n = initial
 
@@ -118,20 +119,62 @@ def solve(domain,initial,bc_top):
         print('time step '+str(i+1)+' out of '+str(nt)+' \r',end='')
 
         # Solve the Darcy-Stokes problem for sol = (phi_i,phi_w,u,p_w,p_e)
-        sol = solve_pde(domain,sol_n,bc_top)
+        z_i,w_i = interp(sol_n.sub(0),domain)
+        z_i,phi_i = interp(sol_n.sub(1),domain)
+        sigma_i = get_stress(sol_n,domain)
 
-        z_i,w_i = interp(sol.sub(0),domain)
-        z_i,phi_i = interp(sol.sub(1),domain)
+        sol = solve_pde(domain,sol_n,bc_top)
 
         w_arr[i,:] = w_i
         phi_arr[i,:] = phi_i
         z_arr[i,:] = z_i
+        sigma_arr[i,:] = sigma_i
         
         domain = move_mesh(domain,sol)
 
         # set the solution at the previous time step
         sol_n.sub(0).interpolate(sol.sub(0))
         sol_n.sub(1).interpolate(sol.sub(1))
-    
-    return w_arr,phi_arr,z_arr
 
+    z_i,w_i = interp(sol_n.sub(0),domain)
+    z_i,phi_i = interp(sol_n.sub(1),domain)
+    sigma_i = get_stress(sol_n,domain)
+
+    return w_arr,phi_arr, sigma_arr, z_arr
+
+
+def vel_solve(domain,phi,bc_top):
+        # Solve the momentum balance for a fixed porosity
+
+        # Define function space
+        V = FunctionSpace(domain, ("CG", 1))
+   
+        w = Function(V)
+        w_t = TestFunction(V)
+ 
+        # Mark bounadries of mesh and define a measure for integration
+        H = domain.geometry.x.max()
+        facets_t = locate_entities_boundary(domain, domain.topology.dim-1, lambda x: np.isclose(x[0],H))
+        facets_b = locate_entities_boundary(domain, domain.topology.dim-1, lambda x: np.isclose(x[0],0))
+         
+        dofs_t = locate_dofs_topological(V, domain.topology.dim-1, facets_t)
+        dofs_b = locate_dofs_topological(V, domain.topology.dim-1, facets_b)
+
+        bc_b = dirichletbc(PETSc.ScalarType(0), dofs_b,V)    # w = 0 at base  
+
+        if bc_top['type'] == 'velocity':
+            bc_t = dirichletbc(PETSc.ScalarType(bc_top['value']), dofs_t,V)  # w = -1 at top
+            bcs = [bc_b,bc_t]
+        else:
+            bcs = [bc_b]   
+    
+        # # Define weak form
+        F = weak_form_vel(w,w_t,phi,bc_top)
+
+        # # Solve for w
+        problem = NonlinearProblem(F, w, bcs=bcs)
+        solver = NewtonSolver(MPI.COMM_WORLD, problem)
+      
+        solver.solve(w)
+      
+        return w

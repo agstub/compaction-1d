@@ -3,25 +3,37 @@ from dolfinx.fem import (Constant, Expression, Function, FunctionSpace,
                          dirichletbc, locate_dofs_topological)
 from dolfinx.fem.petsc import LinearProblem
 from dolfinx.mesh import locate_entities_boundary
-from params import dt, nz
+from params import a, b, dt, nz, phi0
 from petsc4py import PETSc
 from scipy.interpolate import griddata
 from ufl import Dx, TestFunction, TrialFunction, dx
 
 
-def interp(f,domain):
-    P1 = FunctionSpace(domain, ("CG", 1))
-    u = Function(P1)
-    u.interpolate(Expression(f, P1.element.interpolation_points()))
+def K(phi):
+      # 1 / permeability (relative to k0)
+      return (phi**a)/((1-phi)**b)
 
-    x = domain.geometry.x[:,0]
+def max(f1,f2):
+     # max function, used to enforce positive porosity 
+     return 0.5*(f1+f2 + ((f1-f2)**2)**0.5)
+
+def C(phi,phi0):
+     # coefficient on dw/dz in weak form
+     return (4./3. + 1/phi)/(4./3. + 1/phi0)
+
+def interp(f,domain):
+    V = FunctionSpace(domain, ("CG", 1))
+    u = Function(V)
+    u.interpolate(Expression(f, V.element.interpolation_points()))
+
+    z = domain.geometry.x[:,0]
     vals = u.x.array
 
-    X = np.linspace(x.min(),x.max(),nz)
+    Z = np.linspace(z.min(),z.max(),nz+1)
 
-    points = (x)
+    points = (z)
     values = vals
-    points_i = X
+    points_i = Z
 
     F = griddata(points, values, points_i, method='linear')    
 
@@ -64,10 +76,25 @@ def move_mesh(domain,sol):
 
     disp_vv = sol.x.array
 
-    X = domain.geometry.x
+    z = domain.geometry.x
 
-    X[:,0] += dt*disp_vv
+    z[:,0] += dt*disp_vv
 
     return domain
 
 
+def get_stress(sol,domain):
+    # compute the effective stress:
+    # (1-phi)*C(phi,phi0)*(dw/dz)
+    V = FunctionSpace(domain, ("CG", 1))
+    sigma = Function(V)
+    phi = Function(V)
+    w_z = Function(V)
+    phi.interpolate(sol.sub(1))
+    w_z_ = Dx(sol.sub(0),0)
+    w_z.interpolate(Expression(w_z_, V.element.interpolation_points()))
+
+    f = (1-phi)*C(phi,phi0)*w_z
+    sigma.interpolate(Expression(f, V.element.interpolation_points()))
+ 
+    return sigma.x.array
