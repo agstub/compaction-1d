@@ -1,24 +1,24 @@
-# This file contains the functions needed for solving the nonlinear Darcy-Stokes problem.
+# This file contains the functions needed for solving the compaction problem.
 import numpy as np
 from dolfinx.fem import (Function, FunctionSpace, dirichletbc,
                          locate_dofs_topological)
 from dolfinx.fem.petsc import NonlinearProblem
 from dolfinx.mesh import locate_entities_boundary
 from dolfinx.nls.petsc import NewtonSolver
-from misc import C, K, get_stress, interp, max, move_mesh
+from misc import K, alpha, get_stress, interp, max, move_mesh
 from mpi4py import MPI
-from params import alpha, dt, eps, nt, nz, phi0, phi_min, theta
+from params import dt, eps, gamma, nt, nz, phi_min, theta
 from petsc4py import PETSc
 from ufl import Dx, FiniteElement, TestFunction, TestFunctions, ds, dx, split
 
 
 def weak_form(w,w_t,w_n,phi,phi_t,phi_n,bc_top):
-    # Weak form of the residual for the Darcy-Stokes problem
+    # Weak form of the residual for the compaction problem
     w_theta = theta*w + (1-theta)*w_n
     phi_theta = theta*phi + (1-theta)*phi_n
 
     # weak form of momentum balance:
-    F_w =  (eps**2 / K(phi))*w*w_t*dx + (1-phi)*C(phi,phi0)*Dx(w,0)*Dx(w_t,0)*dx  + (1-phi)*alpha*w_t*dx
+    F_w =  (eps**2 / K(phi))*w*w_t*dx + alpha(phi)*Dx(w,0)*Dx(w_t,0)*dx  + (1-phi)*gamma*w_t*dx
 
     # add stress BC if w is not prescribed at top boundary:
     if bc_top['type'] == 'stress':
@@ -32,9 +32,8 @@ def weak_form(w,w_t,w_n,phi,phi_t,phi_n,bc_top):
     return F_w + F_phi
 
 def weak_form_vel(w,w_t,phi,bc_top):
-    # Weak form of the residual 
-    # Non-coupled problem - solve momentum balance for a fixed porosity 
-    F_w =  (eps**2 / K(phi))*w*w_t*dx + (1-phi)*C(phi,phi0)*Dx(w,0)*Dx(w_t,0)*dx  + (1-phi)*alpha*w_t*dx
+    # Non-coupled problem - solve momentum balance for a fixed porosity: 
+    F_w =  (eps**2 / K(phi))*w*w_t*dx + alpha(phi)*Dx(w,0)*Dx(w_t,0)*dx  + (1-phi)*gamma*w_t*dx
     # add stress BC if w is not prescribed at top boundary:
     if bc_top['type'] == 'stress':
         F_w += bc_top['value']*w_t*ds 
@@ -43,7 +42,7 @@ def weak_form_vel(w,w_t,phi,bc_top):
 
 
 def solve_pde(domain,sol_n,bc_top):
-        # Stokes solver for the ice-shelf problem using Taylor-Hood elements
+        # solves the compaction PDE problem at a given time step
 
         # Define function space
         P1 = FiniteElement('P',domain.ufl_cell(),1)     
@@ -96,15 +95,18 @@ def solve_pde(domain,sol_n,bc_top):
         return sol
 
 def full_solve(domain,initial,bc_top):
-    # solve the mixture model given:
+    # solve the compaction problem given:
     # domain: the computational domain
-    # m: melting/freezing rate field 
     # initial: initial conditions 
+    # bc_top: boundary condition at top (stress or velocity)
     # *see example.ipynb for an example of how to set these
     #
-    # the solution sol = (u,phii,pe,pw) returns:
+    # The solution sol = (u,phii) returns:
     # w: vertical velocity 
     # phi: porosity
+    # We also save:
+    # z: domain coordinates (change over time due to compaction)
+    # sigma: the effective stress 
 
     w_arr = np.zeros((nt,nz+1))
     phi_arr = np.zeros((nt,nz+1))
@@ -112,33 +114,31 @@ def full_solve(domain,initial,bc_top):
     sigma_arr = np.zeros((nt,nz+1))
 
     sol_n = initial
-
     phi_i = phi_arr
-    for i in range(nt):
 
+    # time-stepping loop
+    for i in range(nt):
         print('time step '+str(i+1)+' out of '+str(nt)+' \r',end='')
 
-        # Solve the Darcy-Stokes problem for sol = (phi_i,phi_w,u,p_w,p_e)
-        z_i,w_i = interp(sol_n.sub(0),domain)
-        z_i,phi_i = interp(sol_n.sub(1),domain)
-        sigma_i = get_stress(sol_n,domain)
-
+        # solve the compaction problem for sol = (w,phi)
         sol = solve_pde(domain,sol_n,bc_top)
-
-        w_arr[i,:] = w_i
-        phi_arr[i,:] = phi_i
-        z_arr[i,:] = z_i
-        sigma_arr[i,:] = sigma_i
         
+        # displace the mesh according to the velocity solution
         domain = move_mesh(domain,sol)
 
         # set the solution at the previous time step
         sol_n.sub(0).interpolate(sol.sub(0))
         sol_n.sub(1).interpolate(sol.sub(1))
 
-    z_i,w_i = interp(sol_n.sub(0),domain)
-    z_i,phi_i = interp(sol_n.sub(1),domain)
-    sigma_i = get_stress(sol_n,domain)
+        # save the solution as numpy arrays
+        z_i,w_i = interp(sol_n.sub(0),domain)
+        z_i,phi_i = interp(sol_n.sub(1),domain)
+        sigma_i = get_stress(sol_n,domain)
+
+        w_arr[i,:] = w_i
+        phi_arr[i,:] = phi_i
+        z_arr[i,:] = z_i
+        sigma_arr[i,:] = sigma_i
 
     return w_arr,phi_arr, sigma_arr, z_arr
 
@@ -168,10 +168,10 @@ def vel_solve(domain,phi,bc_top):
         else:
             bcs = [bc_b]   
     
-        # # Define weak form
+        # Define weak form
         F = weak_form_vel(w,w_t,phi,bc_top)
 
-        # # Solve for w
+        # Solve for w
         problem = NonlinearProblem(F, w, bcs=bcs)
         solver = NewtonSolver(MPI.COMM_WORLD, problem)
       

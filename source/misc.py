@@ -1,3 +1,5 @@
+# this file contains some helper functions for the compaction problem solver
+
 import numpy as np
 from dolfinx.fem import (Constant, Expression, Function, FunctionSpace,
                          dirichletbc, locate_dofs_topological)
@@ -10,18 +12,20 @@ from ufl import Dx, TestFunction, TrialFunction, dx
 
 
 def K(phi):
-      # 1 / permeability (relative to k0)
+      # scaled permeability
       return (phi**a)/((1-phi)**b)
 
 def max(f1,f2):
      # max function, used to enforce positive porosity 
      return 0.5*(f1+f2 + ((f1-f2)**2)**0.5)
 
-def C(phi,phi0):
+def alpha(phi):
      # coefficient on dw/dz in weak form
-     return (4./3. + 1/phi)/(4./3. + 1/phi0)
+     return (1-phi)*(4./3. + 1/phi)/(4./3. + 1/phi0)
 
 def interp(f,domain):
+    # returns a numpy array of a (dolfinx) function f that has been
+    # evaluated at the mesh nodes
     V = FunctionSpace(domain, ("CG", 1))
     u = Function(V)
     u.interpolate(Expression(f, V.element.interpolation_points()))
@@ -43,7 +47,8 @@ def interp(f,domain):
 def move_mesh(domain,sol):
     # this function computes the surface displacements and moves the mesh
     # by solving Laplace's equation for a smooth displacement function
-    # defined for all mesh vertices
+    # defined for all mesh vertices. (*Solving Laplace is not really necessary 
+    # for this 1d problem but would be helpful for higher dimensions)
 
     V = FunctionSpace(domain, ("CG", 1))
     H = domain.geometry.x.max()
@@ -64,7 +69,7 @@ def move_mesh(domain,sol):
     bcs = [bc_top,bc_base]
 
     # # solve Laplace's equation for a smooth displacement field on all vertices,
-    # # given the boundary displacement disp_bdry
+    # # given the boundary displacement bc's
     disp = TrialFunction(V)
     v = TestFunction(V)
     a = Dx(disp,0)*Dx(v,0)*dx 
@@ -85,7 +90,7 @@ def move_mesh(domain,sol):
 
 def get_stress(sol,domain):
     # compute the effective stress:
-    # (1-phi)*C(phi,phi0)*(dw/dz)
+    # (1-phi)*C(phi)*(dw/dz)
     V = FunctionSpace(domain, ("CG", 1))
     sigma = Function(V)
     phi = Function(V)
@@ -94,7 +99,7 @@ def get_stress(sol,domain):
     w_z_ = Dx(sol.sub(0),0)
     w_z.interpolate(Expression(w_z_, V.element.interpolation_points()))
 
-    f = (1-phi)*C(phi,phi0)*w_z
+    f = alpha(phi)*w_z
     sigma.interpolate(Expression(f, V.element.interpolation_points()))
  
     return sigma.x.array
