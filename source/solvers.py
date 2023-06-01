@@ -18,7 +18,7 @@ def weak_form(w,w_t,w_n,phi,phi_t,phi_n,bc_top):
     phi_theta = theta*phi + (1-theta)*phi_n
 
     # weak form of momentum balance:
-    F_w =  (eps**2 / K(phi))*w*w_t*dx + alpha(phi)*Dx(w,0)*Dx(w_t,0)*dx  + (1-phi)*gamma*w_t*dx
+    F_w =  (eps**2 / K(phi))*w*w_t*dx + alpha(w,phi)*Dx(w,0)*Dx(w_t,0)*dx  + (1-phi)*gamma*w_t*dx
 
     # add stress BC if w is not prescribed at top boundary:
     if bc_top['type'] == 'stress':
@@ -33,7 +33,7 @@ def weak_form(w,w_t,w_n,phi,phi_t,phi_n,bc_top):
 
 def weak_form_vel(w,w_t,phi,bc_top):
     # Non-coupled problem - solve momentum balance for a fixed porosity: 
-    F_w =  (eps**2 / K(phi))*w*w_t*dx + alpha(phi)*Dx(w,0)*Dx(w_t,0)*dx  + (1-phi)*gamma*w_t*dx
+    F_w =  (eps**2 / K(phi))*w*w_t*dx + alpha(w,phi)*Dx(w,0)*Dx(w_t,0)*dx  + (1-phi)*gamma*w_t*dx
     # add stress BC if w is not prescribed at top boundary:
     if bc_top['type'] == 'stress':
         F_w += bc_top['value']*w_t*ds 
@@ -171,6 +171,7 @@ def vel_solve(domain,phi,bc_top):
         # Define weak form
         F = weak_form_vel(w,w_t,phi,bc_top)
 
+        w.interpolate(lambda x: -x[0]/H)
         # Solve for w
         problem = NonlinearProblem(F, w, bcs=bcs)
         solver = NewtonSolver(MPI.COMM_WORLD, problem)

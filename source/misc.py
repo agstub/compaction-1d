@@ -19,9 +19,16 @@ def max(f1,f2):
      # max function, used to enforce positive porosity 
      return 0.5*(f1+f2 + ((f1-f2)**2)**0.5)
 
-def alpha(phi):
+def eta_eff(w,phi):
+     # Viscosity as a function of dw/dz and porosity
+     # f = (Dx(w,0)**2)**((1.0/0.15-1.0)/2)     # shear thickening (hmmm...)
+     # f = 1                                    # Newtonian
+     f = 1+1e2*(1-phi)                          # viscosity decreases with porosity
+     return f
+
+def alpha(w,phi):
      # coefficient on dw/dz in weak form
-     return (1-phi)*(4./3. + 1/phi)/(4./3. + 1/phi0)
+     return (1-phi)*(4./3. + 1/phi)/(4./3. + 1/phi0)*eta_eff(w,phi)
 
 def interp(f,domain):
     # returns a numpy array of a (dolfinx) function f that has been
@@ -90,7 +97,7 @@ def move_mesh(domain,sol):
 
 def get_stress(sol,domain):
     # compute the effective stress:
-    # (1-phi)*C(phi)*(dw/dz)
+    # (1-phi)*alpha(phi)*(dw/dz)
     V = FunctionSpace(domain, ("CG", 1))
     sigma = Function(V)
     phi = Function(V)
@@ -99,7 +106,7 @@ def get_stress(sol,domain):
     w_z_ = Dx(sol.sub(0),0)
     w_z.interpolate(Expression(w_z_, V.element.interpolation_points()))
 
-    f = alpha(phi)*w_z
+    f = alpha(sol.sub(0),phi)*w_z
     sigma.interpolate(Expression(f, V.element.interpolation_points()))
  
     return sigma.x.array
