@@ -23,7 +23,7 @@ def eta_eff(w,phi):
      # Viscosity as a function of dw/dz and porosity
      # f = (Dx(w,0)**2)**((1.0/0.15-1.0)/2)     # shear thickening (hmmm...)
      # f = 1                                    # Newtonian
-     f = 1+1e2*(1-phi)                          # viscosity decreases with porosity
+     f = 1+6e2*(1-phi)**4                    # viscosity decreases with porosity
      return f
 
 def alpha(w,phi):
