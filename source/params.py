@@ -32,7 +32,7 @@ dz = 1/(nz+1)
 
 # time-stepping parameters:
 t_f = mp.t_f/(H0/w0)                          # Final time (relative to time scale)
-nt = 2*int(t_f/dz)                            # Number of time steps
+nt = 5000 #2*int(t_f/dz)                      # Number of time steps
 dt = t_f/nt                                   # Timestep size
 theta = 0.5                                   # time-integration parameter 
                                               # (0=forward euler, 0.5 = trapezoid, 1 = backward euler)

@@ -14,4 +14,4 @@ def Pi(phi):
 
 def alpha(phi):
      # effective viscosity (coefficient on dw/dz in weak form)
-     return (1-phi)*(1+1e2*(1-phi)**4)   
+     return (1-phi)*(1+6e2*(1-phi)**4)   #
